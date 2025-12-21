@@ -259,9 +259,8 @@ def export_validation_result(
     # Result 시트 데이터
     for row_idx, payload in enumerate(rows, start=2):
         values = [
-            payload.rm_table1,
-            payload.inci_table1,
-            payload.inci_table2,
+            payload.rm,
+            payload.inci,
             payload.rm_fp_table1,
             payload.rm_fp_table2,
             payload.inci_rm_table1,
