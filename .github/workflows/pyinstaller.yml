@@ -1,4 +1,5 @@
 name: pyinstaller-build
+run-name: Build ${{ github.ref_name }}
 
 on:
   push:
