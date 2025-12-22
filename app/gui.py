@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import os
-import subprocess
-import sys
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox
@@ -51,6 +49,9 @@ class TemplateValidatorApp(tk.Tk):
         self.unique_keys_table2: set[tuple[str, str]] = set()
         # 마지막 검증 결과(엑셀 다운로드용)
         self.last_result_rows: list[ValidationPayload] | None = None
+        # 셀 편집용 엔트리 상태
+        self._cell_editor: ttk.Entry | None = None
+        self._cell_editor_info: tuple[ttk.Treeview, str, int] | None = None
 
         self._build_header()
         self._build_table_preview()
@@ -64,15 +65,17 @@ class TemplateValidatorApp(tk.Tk):
     def _build_header(self) -> None:
         header = ttk.Frame(self)
         header.grid(row=0, column=0, sticky="ew")
-        header.columnconfigure(2, weight=1)
+        header.columnconfigure(3, weight=1)
 
         download_btn = ttk.Button(header, text="템플릿 다운로드", command=self.download_template)
         upload_btn = ttk.Button(header, text="템플릿 불러오기", command=self.upload_template)
+        download_result_btn = ttk.Button(header, text="검증 결과 다운로드", command=self.download_result)
         file_label = ttk.Label(header, textvariable=self.selected_file, foreground="#444444")
 
         download_btn.grid(row=0, column=0, padx=(0, 8))
         upload_btn.grid(row=0, column=1, padx=(0, 8))
-        file_label.grid(row=0, column=2, sticky="ew")
+        download_result_btn.grid(row=0, column=2, padx=(0, 8))
+        file_label.grid(row=0, column=3, sticky="ew")
 
     def _build_table_preview(self) -> None:
         preview = ttk.LabelFrame(self, text="템플릿 미리보기")
@@ -112,31 +115,17 @@ class TemplateValidatorApp(tk.Tk):
 
         self.table1_tree.master.grid(row=1, column=0, sticky="nsew")
         self.table2_tree.master.grid(row=1, column=0, sticky="nsew")
+        self._bind_cell_editing(self.table1_tree)
+        self._bind_cell_editing(self.table2_tree)
 
     def _build_result_panel(self) -> None:
         container = ttk.Frame(self)
         container.grid(row=2, column=0, sticky="nsew")
         container.columnconfigure(0, weight=1)
-        container.rowconfigure(1, weight=1)
-
-        control_frame = ttk.Frame(container)
-        control_frame.grid(row=0, column=0, sticky="ew", pady=(0, 8))
-        control_frame.columnconfigure(2, weight=1)
-
-        validate_btn = ttk.Button(control_frame, text="검증 실행", command=self.run_validation)
-        download_result_btn = ttk.Button(
-            control_frame,
-            text="검증 결과 다운로드",
-            command=self.download_result,
-        )
-        status_label = ttk.Label(control_frame, textvariable=self.status_var)
-
-        validate_btn.grid(row=0, column=0, padx=(0, 8))
-        download_result_btn.grid(row=0, column=1, padx=(0, 8))
-        status_label.grid(row=0, column=2, sticky="w")
+        container.rowconfigure(0, weight=1)
 
         result_frame = ttk.LabelFrame(container, text="검증 결과 (테이블 비교)")
-        result_frame.grid(row=1, column=0, sticky="nsew")
+        result_frame.grid(row=0, column=0, sticky="nsew")
         result_frame.columnconfigure(0, weight=1)
         result_frame.rowconfigure(0, weight=1)
         self.result_frame = result_frame
@@ -196,21 +185,162 @@ class TemplateValidatorApp(tk.Tk):
         # payload가 있으면 데이터 채우기
         if payload and not payload.is_empty and payload.header:
             headers = list(payload.header)
-            for row_dict in payload.data:
+            tree._payload_headers = headers
+            for row_index, row_dict in enumerate(payload.data):
                 values = [row_dict.get(h, "") for h in headers]
                 if unique_keys is not None:
                     rm = self._to_str(row_dict.get(Header.RM))
                     inci = self._to_str(row_dict.get(Header.INCI))
                     key = (rm, inci)
                     if key in unique_keys:
-                        tree.insert("", "end", values=values, tags=("unique",))
+                        tree.insert(
+                            "",
+                            "end",
+                            iid=str(row_index),
+                            values=values,
+                            tags=("unique",),
+                        )
                         continue
-                tree.insert("", "end", values=values)
+                tree.insert("", "end", iid=str(row_index), values=values)
 
         return tree
 
+    def _bind_cell_editing(self, tree: ttk.Treeview) -> None:
+        tree.bind("<Double-1>", lambda event, t=tree: self._start_cell_edit(event, t))
+
+    def _get_payload_for_tree(self, tree: ttk.Treeview) -> TablePayload | None:
+        if tree is self.table1_tree:
+            return self.table1_payload
+        if tree is self.table2_tree:
+            return self.table2_payload
+        return None
+
+    def _start_cell_edit(self, event: tk.Event, tree: ttk.Treeview) -> None:
+        payload = self._get_payload_for_tree(tree)
+        if not payload or payload.is_empty:
+            return
+
+        if tree.identify_region(event.x, event.y) != "cell":
+            return
+
+        row_id = tree.identify_row(event.y)
+        col_id = tree.identify_column(event.x)
+        if not row_id or not col_id or col_id == "#0":
+            return
+
+        try:
+            col_index = int(col_id[1:]) - 1
+        except ValueError:
+            return
+
+        columns = tree["columns"]
+        if col_index < 0 or col_index >= len(columns):
+            return
+
+        bbox = tree.bbox(row_id, col_id)
+        if not bbox:
+            return
+
+        self._destroy_cell_editor()
+
+        value = tree.set(row_id, columns[col_index])
+        entry = ttk.Entry(tree)
+        entry.insert(0, value)
+        entry.select_range(0, tk.END)
+        entry.focus()
+
+        x, y, width, height = bbox
+        entry.place(x=x, y=y, width=width, height=height)
+
+        self._cell_editor = entry
+        self._cell_editor_info = (tree, row_id, col_index)
+
+        entry.bind("<Return>", self._commit_cell_edit)
+        entry.bind("<Escape>", self._cancel_cell_edit)
+        entry.bind("<FocusOut>", self._commit_cell_edit)
+
+    def _commit_cell_edit(self, event: tk.Event | None = None) -> None:
+        if self._cell_editor is None or self._cell_editor_info is None:
+            return
+
+        tree, row_id, col_index = self._cell_editor_info
+        columns = tree["columns"]
+        if col_index < 0 or col_index >= len(columns):
+            self._destroy_cell_editor()
+            return
+
+        col_name = columns[col_index]
+        new_value = self._cell_editor.get()
+        old_value = tree.set(row_id, col_name)
+        if new_value == old_value:
+            self._destroy_cell_editor()
+            return
+
+        tree.set(row_id, col_name, new_value)
+
+        payload = self._get_payload_for_tree(tree)
+        if payload and not payload.is_empty:
+            try:
+                row_index = int(row_id)
+            except ValueError:
+                row_index = tree.index(row_id)
+
+            if 0 <= row_index < len(payload.data):
+                headers = getattr(tree, "_payload_headers", None)
+                if headers and col_index < len(headers):
+                    header_key = headers[col_index]
+                else:
+                    header_key = col_name
+                payload.data[row_index][header_key] = new_value
+
+        self._destroy_cell_editor()
+        self._run_validation()
+
+    def _cancel_cell_edit(self, event: tk.Event | None = None) -> None:
+        self._destroy_cell_editor()
+
+    def _destroy_cell_editor(self) -> None:
+        if self._cell_editor is not None:
+            self._cell_editor.destroy()
+        self._cell_editor = None
+        self._cell_editor_info = None
+
+    def _capture_tree_scroll(self, tree: ttk.Treeview | None) -> tuple[float, float]:
+        if tree is None:
+            return (0.0, 0.0)
+        xview = tree.xview()
+        yview = tree.yview()
+        x_pos = xview[0] if xview else 0.0
+        y_pos = yview[0] if yview else 0.0
+        return (x_pos, y_pos)
+
+    def _restore_tree_scroll(self, tree: ttk.Treeview | None, x_pos: float, y_pos: float) -> None:
+        if tree is None:
+            return
+        tree.xview_moveto(x_pos)
+        tree.yview_moveto(y_pos)
+
+    def _capture_tree_selection(self, tree: ttk.Treeview | None) -> list[str]:
+        if tree is None:
+            return []
+        return list(tree.selection())
+
+    def _restore_tree_selection(self, tree: ttk.Treeview | None, selection: list[str]) -> None:
+        if tree is None or not selection:
+            return
+        existing = [item for item in selection if tree.exists(item)]
+        if not existing:
+            return
+        tree.selection_set(existing)
+        tree.focus(existing[0])
+        tree.see(existing[0])
+
     def _rebuild_table_views(self) -> None:
         """로드된 테이블 1/2 Treeview를 payload 기준으로 다시 생성."""
+        table1_scroll = self._capture_tree_scroll(self.table1_tree)
+        table2_scroll = self._capture_tree_scroll(self.table2_tree)
+        table1_selection = self._capture_tree_selection(self.table1_tree)
+        table2_selection = self._capture_tree_selection(self.table2_tree)
         if self.table1_frame is not None:
             if self.table1_tree is not None:
                 self.table1_tree.master.destroy()
@@ -220,6 +350,9 @@ class TemplateValidatorApp(tk.Tk):
                 self.unique_keys_table1,
             )
             self.table1_tree.master.grid(row=1, column=0, sticky="nsew")
+            self._bind_cell_editing(self.table1_tree)
+            self._restore_tree_scroll(self.table1_tree, *table1_scroll)
+            self._restore_tree_selection(self.table1_tree, table1_selection)
 
         if self.table2_frame is not None:
             if self.table2_tree is not None:
@@ -230,6 +363,9 @@ class TemplateValidatorApp(tk.Tk):
                 self.unique_keys_table2,
             )
             self.table2_tree.master.grid(row=1, column=0, sticky="nsew")
+            self._bind_cell_editing(self.table2_tree)
+            self._restore_tree_scroll(self.table2_tree, *table2_scroll)
+            self._restore_tree_selection(self.table2_tree, table2_selection)
 
     def _compute_unique_keys(self) -> None:
         """각 테이블에만 존재하는 (RM, INCI) 키 집합을 계산한다."""
@@ -301,11 +437,12 @@ class TemplateValidatorApp(tk.Tk):
                 ]
 
                 tag = self._get_result_row_tag(payload)
+                item_id = f"{payload.rm}||{payload.inci}"
 
                 if tag:
-                    tree.insert("", "end", values=values, tags=(tag,))
+                    tree.insert("", "end", iid=item_id, values=values, tags=(tag,))
                 else:
-                    tree.insert("", "end", values=values)
+                    tree.insert("", "end", iid=item_id, values=values)
 
         return tree
 
@@ -374,7 +511,9 @@ class TemplateValidatorApp(tk.Tk):
             self.summary_label.configure(text="불일치 0건 / 총 0건")
         self.status_var.set("템플릿 불러오기 완료")
 
-    def run_validation(self) -> None:
+        self._run_validation()
+
+    def _run_validation(self) -> None:
         if not self.table1_payload or not self.table2_payload:
             messagebox.showwarning("검증", "먼저 템플릿을 불러와 주세요.")
             return
@@ -393,11 +532,15 @@ class TemplateValidatorApp(tk.Tk):
         self._compute_unique_keys()
         self._rebuild_table_views()
 
+        result_scroll = self._capture_tree_scroll(self.result_tree)
+        result_selection = self._capture_tree_selection(self.result_tree)
         if self.result_frame is not None:
             if self.result_tree is not None:
                 self.result_tree.master.destroy()
             self.result_tree = self._create_result_view(rows, self.result_frame)
             self.result_tree.master.grid(row=0, column=0, sticky="nsew")
+            self._restore_tree_scroll(self.result_tree, *result_scroll)
+            self._restore_tree_selection(self.result_tree, result_selection)
 
         total = len(rows)
         if self.summary_label is not None:
