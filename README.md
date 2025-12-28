@@ -55,10 +55,19 @@
 pip install PyQt5 openpyxl
 ```
 
-### 2. 애플리케이션 실행
+### 2. 애플리케이션 실행 (Python)
 
 프로젝트 루트 폴더에서 아래 명령어를 실행합니다.
 
 ```bash
 python -m app.main
 ```
+
+### 3. 애플리케이션 실행 (EXE)
+
+별도의 파이썬 설치 없이 실행 가능한 `.exe` 파일은 **GitHub Actions**에서 받을 수 있습니다.
+
+1.  GitHub 저장소 상단 메뉴의 **Actions** 탭 클릭
+2.  가장 최근의 **Workflow Run** 클릭
+3.  하단 **Artifacts** 섹션에서 실행 파일 다운로드
+
