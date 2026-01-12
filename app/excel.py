@@ -116,7 +116,7 @@ def render_table(table, data_list: list[IngredientRow]):
     """데이터 리스트를 테이블에 그리고, 자동 병합을 수행합니다."""
     # 1. 정렬 (RM 이름 -> INCI 이름 순)
     if data_list:
-        data_list.sort(key=lambda x: (x.rm_name, x.inci_name))
+        data_list.sort(key=lambda x: (x.rm_name.lower(), x.inci_name.lower()))
 
     # 2. 초기화
     table.clearContents()
@@ -256,7 +256,9 @@ def _parse_structured_data_from_list(data_list: list[IngredientRow]):
         data[rm_name]["rows"].append(i)
         
         if row.inci_name:
-            data[rm_name]["incis"][row.inci_name] = {
+            # 대소문자 무시 비교를 위해 Key를 소문자로 변환
+            inci_key = row.inci_name.strip().lower()
+            data[rm_name]["incis"][inci_key] = {
                 "percent": row.inci_percent,
                 "row": i
             }
