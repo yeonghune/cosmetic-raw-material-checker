@@ -1,6 +1,14 @@
 from PyQt5 import QtWidgets, QtCore, QtGui
-from PyQt5.QtWidgets import QMessageBox, QTableWidget
-from app.excel import re_sort_table
+from PyQt5.QtWidgets import QMessageBox, QTableWidget, QPushButton
+from app.utils.table_handler import re_sort_table
+from app.ui.styles import AppStyles, AppColors
+
+class StyledButton(QPushButton):
+    """Standard Button with predefined styles."""
+    def __init__(self, text, parent=None):
+        super().__init__(text, parent)
+        self.setMinimumHeight(AppStyles.BUTTON_HEIGHT)
+
 
 class MaterialTableWidget(QTableWidget):
     """
@@ -149,8 +157,8 @@ class MaterialTableWidget(QTableWidget):
 
     def reset_styles(self):
         """Reset all cell styles to default (White bg, Black text)."""
-        white_brush = QtGui.QBrush(QtGui.QColor(255, 255, 255))
-        black_brush = QtGui.QBrush(QtGui.QColor(0, 0, 0))
+        white_brush = QtGui.QBrush(AppColors.WHITE)
+        black_brush = QtGui.QBrush(AppColors.BLACK)
         
         for r in range(self.rowCount()):
             for c in range(self.columnCount()):
@@ -164,8 +172,8 @@ class MaterialTableWidget(QTableWidget):
         from PyQt5 import QtGui
         from app.models import DiffType
         
-        red_brush = QtGui.QBrush(QtGui.QColor(255, 0, 0))
-        bg_red_brush = QtGui.QBrush(QtGui.QColor(255, 200, 200))
+        red_brush = QtGui.QBrush(AppColors.TEXT_RED)
+        bg_red_brush = QtGui.QBrush(AppColors.BG_RED)
         
         # Block signals to prevent itemChanged recursion
         was_blocked = self.signalsBlocked()
